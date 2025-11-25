@@ -32,20 +32,6 @@ This project ensures high exam integrity while reducing the need for continuous 
 **Languages:** Python  
 
 ---
-## 🔧 System Architecture  
-IP Camera (RTSP Stream)
-↓
-OpenCV Frame Processing
-↓
-[Attendance Mode]
-DLIB Face Recognition → Mark Attendance → Save Logs
-↓ (auto switch)
-[Cheating Detection Mode]
-YOLOv11 Detection → Capture Evidence
-↓
-Email Alert (SMTP) → Admin with Proof Image
----
-
 ## 📂 Dataset  
 Custom dataset built in Roboflow containing:
 
