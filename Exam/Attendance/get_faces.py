@@ -1,91 +1,133 @@
 import cv2
-import os
 import dlib
-import numpy as np
+import os
+import datetime
+import sqlite3
 import logging
-import time
+import tkinter as tk
+from tkinter import messagebox
+from PIL import Image, ImageTk
 
-# Use OpenCV's Haar Cascade for face detection
-face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 
-# Dlib for face landmarks and recognition model
-predictor = dlib.shape_predictor('data/data_dlib/shape_predictor_68_face_landmarks.dat')
-face_reco_model = dlib.face_recognition_model_v1("data/data_dlib/dlib_face_recognition_resnet_model_v1.dat")
+class FaceRecognizerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("📸 Face Registration System")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#f0f0f0")
 
-class Face_Register:
-    def __init__(self):
-        self.path_photos_from_camera = "data/data_faces_from_camera/"
-        self.existing_faces_cnt = 0
-        self.ss_cnt = 0
-        self.current_face_dir = ""
+        # Variables
+        self.subjects_var = tk.StringVar()
+        self.student_var = tk.StringVar()
+        self.cap = None
+        self.running = False
+
+        # === UI SETUP ===
+        tk.Label(root, text="📚 Smart Attendance Register", font=("Arial", 18, "bold"), bg="#f0f0f0").pack(pady=10)
+
+        tk.Label(root, text="Enter Subject Names (space-separated):", bg="#f0f0f0").pack()
+        tk.Entry(root, textvariable=self.subjects_var, width=50).pack(pady=5)
+
+        tk.Label(root, text="Enter Student Name:", bg="#f0f0f0").pack()
+        tk.Entry(root, textvariable=self.student_var, width=50).pack(pady=5)
+
+        tk.Button(root, text="Start Camera", command=self.start_camera, bg="#4caf50", fg="white", width=15).pack(pady=10)
+        tk.Button(root, text="Save Photo", command=self.save_photo, bg="#2196f3", fg="white", width=15).pack(pady=5)
+        tk.Button(root, text="Quit", command=self.quit_app, bg="#f44336", fg="white", width=15).pack(pady=5)
+
+        self.video_label = tk.Label(root, bg="#000000")
+        self.video_label.pack(pady=10)
+
+        # === Face detection setup ===
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        haar_path = os.path.join(base_dir, 'haarcascade_frontalface_default.xml')
+        self.face_cascade = cv2.CascadeClassifier(haar_path)
+
+    # ---------------------------------------------------------------------
+    def start_camera(self):
+        subjects = self.subjects_var.get().strip()
+        student = self.student_var.get().strip()
+
+        if not subjects or not student:
+            messagebox.showwarning("Input Required", "Please enter both subject(s) and student name.")
+            return
+
+        self.subject_names = [s.strip().capitalize() for s in subjects.split()]
+        self.student_name = student.strip().capitalize()
+
+        # Prepare folders
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        students_base = os.path.join(base_dir, "students")
+        os.makedirs(students_base, exist_ok=True)
+
+        self.subject_folders = []
+        for subject in self.subject_names:
+            subject_folder = os.path.join(students_base, subject)
+            student_folder = os.path.join(subject_folder, self.student_name)
+            os.makedirs(student_folder, exist_ok=True)
+            self.subject_folders.append((subject, student_folder))
+
+        # Start camera
         self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            messagebox.showerror("Camera Error", "Unable to access webcam.")
+            return
 
-    def pre_work_mkdir(self):
-        if not os.path.isdir(self.path_photos_from_camera):
-            os.mkdir(self.path_photos_from_camera)
+        self.running = True
+        self.show_frame()
 
-    def check_existing_faces_cnt(self):
-        if os.listdir(self.path_photos_from_camera):
-            person_list = os.listdir(self.path_photos_from_camera)
-            person_num_list = []
-            for person in person_list:
-                person_order = person.split('_')[1].split('_')[0]
-                person_num_list.append(int(person_order))
-            self.existing_faces_cnt = max(person_num_list)
-        else:
-            self.existing_faces_cnt = 0
-
-    def create_face_folder(self, name):
-        self.existing_faces_cnt += 1
-        self.current_face_dir = os.path.join(self.path_photos_from_camera, f"person_{self.existing_faces_cnt}_{name}")
-        os.makedirs(self.current_face_dir)
-        logging.info(f"Created folder: {self.current_face_dir}")
-        self.ss_cnt = 0
-
-    def save_current_face(self, frame, face_rect):
-        x, y, w, h = face_rect
-        face_img = frame[y:y+h, x:x+w]
-        self.ss_cnt += 1
-        save_path = os.path.join(self.current_face_dir, f"img_face_{self.ss_cnt}.jpg")
-        cv2.imwrite(save_path, face_img)
-        logging.info(f"Saved: {save_path}")
-
-    def run(self):
-        self.pre_work_mkdir()
-        self.check_existing_faces_cnt()
-
-        person_name = input("Enter the name of the person: ")
-        self.create_face_folder(person_name)
-
-        while self.cap.isOpened():
+    # ---------------------------------------------------------------------
+    def show_frame(self):
+        if self.running and self.cap:
             ret, frame = self.cap.read()
-            if not ret:
-                break
+            if ret:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(frame, self.student_name, (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                # Convert to Tkinter image
+                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(img)
+                imgtk = ImageTk.PhotoImage(image=img)
+                self.video_label.imgtk = imgtk
+                self.video_label.configure(image=imgtk)
 
-            cv2.imshow("Register Face", frame)
+            self.root.after(10, self.show_frame)
 
-            key = cv2.waitKey(1)
-            if key == ord('s'):
-                if len(faces) == 1:
-                    self.save_current_face(frame, faces[0])
-                else:
-                    print("No face or multiple faces detected. Please ensure only one face is in the frame.")
-            elif key == ord('q'):
-                break
+    # ---------------------------------------------------------------------
+    def save_photo(self):
+        if not self.cap or not self.running:
+            messagebox.showwarning("Warning", "Camera not running.")
+            return
 
-        self.cap.release()
+        ret, frame = self.cap.read()
+        if not ret:
+            messagebox.showerror("Error", "Failed to capture frame.")
+            return
+
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        for subject, folder in self.subject_folders:
+            filename = os.path.join(folder, f"{self.student_name}_{subject}_{timestamp}.jpg")
+            cv2.imwrite(filename, frame)
+            print(f"✅ Saved: {filename}")
+
+        messagebox.showinfo("Saved", f"Photo saved for {self.student_name} in all subjects.")
+
+    # ---------------------------------------------------------------------
+    def quit_app(self):
+        self.running = False
+        if self.cap:
+            self.cap.release()
         cv2.destroyAllWindows()
+        self.root.destroy()
 
-def main():
-    logging.basicConfig(level=logging.INFO)
-    Face_Register_con = Face_Register()
-    Face_Register_con.run()
 
-if __name__ == '__main__':
-    main()
+# -------------------------------------------------------------------------
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FaceRecognizerApp(root)
+    root.mainloop()

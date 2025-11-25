@@ -5,69 +5,92 @@ import numpy as np
 import logging
 import cv2
 
-path_images_from_camera = "data/data_faces_from_camera/"
+# === Folder structure ===
+# students/
+# ├── Math/
+# │   ├── John/
+# │   │   ├── 1.jpg
+# │   │   └── 2.jpg
+# │   ├── Alice/
+# │   │   ├── 1.jpg
+# │   │   └── 2.jpg
+# ├── Physics/
+# │   ├── John/
+# │   └── Bob/
 
-# Use dlib for shape prediction and face recognition
-predictor = dlib.shape_predictor('data/data_dlib/shape_predictor_68_face_landmarks.dat')
-face_reco_model = dlib.face_recognition_model_v1("data/data_dlib/dlib_face_recognition_resnet_model_v1.dat")
+base_dir = os.path.dirname(os.path.abspath(__file__))
+path_students_base = os.path.join(base_dir, "students")  # main folder containing subjects
+path_data = os.path.join(base_dir, "data")
+path_dlib = os.path.join(path_data, "data_dlib")
+
+# === Load models ===
+predictor = dlib.shape_predictor(os.path.join(path_dlib, 'shape_predictor_68_face_landmarks.dat'))
+face_reco_model = dlib.face_recognition_model_v1(
+    os.path.join(path_dlib, 'dlib_face_recognition_resnet_model_v1.dat')
+)
 
 
 def return_128d_features(path_img):
+    """Return 128D face descriptor for a given image."""
     img_rd = cv2.imread(path_img)
+    if img_rd is None:
+        logging.warning(f"⚠️ Unable to read image: {path_img}")
+        return 0
+
     img_gray = cv2.cvtColor(img_rd, cv2.COLOR_BGR2GRAY)
+    detector = dlib.get_frontal_face_detector()
+    faces = detector(img_gray, 1)
 
-    # We are assuming one face per image for the registered photos
-    faces = [dlib.rectangle(0, 0, img_gray.shape[1], img_gray.shape[0])]
+    if len(faces) == 0:
+        logging.warning(f"⚠️ No face detected in {path_img}")
+        return 0
 
-    logging.info(f"Processing image: {path_img}")
-
-    if len(faces) != 0:
-        shape = predictor(img_rd, faces[0])
-        face_descriptor = face_reco_model.compute_face_descriptor(img_rd, shape)
-    else:
-        face_descriptor = 0
-        logging.warning("No face detected in the saved image.")
+    shape = predictor(img_rd, faces[0])
+    face_descriptor = face_reco_model.compute_face_descriptor(img_rd, shape)
     return face_descriptor
 
 
-def return_features_mean_personX(path_face_personX):
-    features_list_personX = []
-    photos_list = os.listdir(path_face_personX)
-    if photos_list:
-        for photo in photos_list:
-            features_128d = return_128d_features(os.path.join(path_face_personX, photo))
-            if features_128d != 0:
-                features_list_personX.append(features_128d)
-    else:
-        logging.warning(f"Warning: No images in {path_face_personX}")
+def return_features_mean_student(student_folder_path):
+    """Return average 128D feature vector for all images of a student."""
+    features_list = []
+    photos_list = [f for f in os.listdir(student_folder_path) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
 
-    if features_list_personX:
-        features_mean_personX = np.array(features_list_personX, dtype=object).mean(axis=0)
+    for photo in photos_list:
+        feature_128d = return_128d_features(os.path.join(student_folder_path, photo))
+        if feature_128d != 0:
+            features_list.append(feature_128d)
+
+    if len(features_list) == 0:
+        logging.warning(f"⚠️ No valid faces found in {student_folder_path}")
+        return np.zeros(128, dtype=float)
     else:
-        features_mean_personX = np.zeros(128, dtype=object, order='C')
-    return features_mean_personX
+        return np.mean(features_list, axis=0)
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    person_list = os.listdir(path_images_from_camera)
-    person_list.sort()
+    subjects = [s for s in os.listdir(path_students_base) if os.path.isdir(os.path.join(path_students_base, s))]
 
-    with open("data/features_all.csv", "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        for person in person_list:
-            logging.info(f"Processing person: {person}")
-            features_mean_personX = return_features_mean_personX(os.path.join(path_images_from_camera, person))
+    for subject in subjects:
+        subject_path = os.path.join(path_students_base, subject)
+        students = [s for s in os.listdir(subject_path) if os.path.isdir(os.path.join(subject_path, s))]
+        features_csv_path = os.path.join(path_data, f"features_{subject}.csv")
 
-            try:
-                person_name = person.split('_', 2)[-1]
-            except IndexError:
-                person_name = person
+        logging.info(f"📘 Processing subject: {subject} ({len(students)} students)")
+        with open(features_csv_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            for student in students:
+                student_folder = os.path.join(subject_path, student)
+                logging.info(f"👤 Processing student: {student}")
+                features_mean = return_features_mean_student(student_folder)
 
-            features_mean_personX = np.insert(features_mean_personX, 0, person_name, axis=0)
-            writer.writerow(features_mean_personX)
-        logging.info("Saved all features to data/features_all.csv")
+                # ✅ FIX: convert to list and prepend name
+                row = [student] + features_mean.tolist()
+                writer.writerow(row)
+            logging.info(f"✅ Saved features to {features_csv_path}")
+
+    logging.info("🎯 Feature extraction completed for all subjects.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
